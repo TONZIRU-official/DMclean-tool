@@ -1,19 +1,45 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <title>4 Lane Rhythm Game</title>
+  <meta charset="utf-8" />
+  <title>4レーン 音ゲー（解析版）</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <div class="container">
+    <h1>4レーン 音ゲー（解析版）</h1>
 
-  <h1>4レーン音ゲー（アップロード式）</h1>
+    <div class="controls">
+      <input type="file" id="audioFile" accept="audio/*" />
+      <button id="analyzeBtn">Analyze</button>
+      <label>Sensitivity <input id="sensitivity" type="range" min="0.5" max="3" step="0.1" value="1.5"></label>
+      <label>Subdivision
+        <select id="subdiv">
+          <option value="4">1/4</option>
+          <option value="8" selected>1/8</option>
+          <option value="12">1/12</option>
+          <option value="16">1/16</option>
+        </select>
+      </label>
+      <button id="genNotesBtn">Generate Notes</button>
+      <button id="startBtn">Start</button>
+      <button id="stopBtn">Stop</button>
+    </div>
 
-  <input type="file" id="audioFile" accept="audio/*"><br><br>
-  <button id="startBtn">スタート</button>
+    <div class="info">
+      <div>BPM Estimate: <span id="bpm">—</span></div>
+      <div>Onsets Detected: <span id="onsetCount">0</span></div>
+    </div>
 
-  <div id="game">
-    <canvas id="gameCanvas" width="400" height="600"></canvas>
+    <div id="gameArea">
+      <canvas id="gameCanvas" width="480" height="640"></canvas>
+      <div class="legend">Keys: F G H J</div>
+    </div>
+
+    <div class="notes-debug">
+      <h3>Notes (first 100)</h3>
+      <pre id="notesOut">[]</pre>
+    </div>
   </div>
 
   <script src="main.js"></script>
