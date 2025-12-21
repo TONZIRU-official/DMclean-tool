@@ -1,47 +1,116 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
-  <meta charset="utf-8" />
-  <title>4レーン 音ゲー（解析版）</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta charset="utf-8">
+  <title>Hand Tracking Game Base</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+    #container { position: relative; width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; }
+    /* カメラ映像を左右反転（鏡のようにする） */
+    canvas, video { position: absolute; transform: scaleX(-1); width: 100%; height: 100%; object-fit: cover; }
+    #ui { position: absolute; top: 20px; left: 20px; color: white; z-index: 10; pointer-events: none; }
+    .msg { background: rgba(0,0,0,0.5); padding: 10px; border-radius: 8px; }
+  </style>
 </head>
 <body>
-  <div class="container">
-    <h1>4レーン 音ゲー（解析版）</h1>
 
-    <div class="controls">
-      <input type="file" id="audioFile" accept="audio/*" />
-      <button id="analyzeBtn">Analyze</button>
-      <label>Sensitivity <input id="sensitivity" type="range" min="0.5" max="3" step="0.1" value="1.5"></label>
-      <label>Subdivision
-        <select id="subdiv">
-          <option value="4">1/4</option>
-          <option value="8" selected>1/8</option>
-          <option value="12">1/12</option>
-          <option value="16">1/16</option>
-        </select>
-      </label>
-      <button id="genNotesBtn">Generate Notes</button>
-      <button id="startBtn">Start</button>
-      <button id="stopBtn">Stop</button>
-    </div>
-
-    <div class="info">
-      <div>BPM Estimate: <span id="bpm">—</span></div>
-      <div>Onsets Detected: <span id="onsetCount">0</span></div>
-    </div>
-
-    <div id="gameArea">
-      <canvas id="gameCanvas" width="480" height="640"></canvas>
-      <div class="legend">Keys: F G H J</div>
-    </div>
-
-    <div class="notes-debug">
-      <h3>Notes (first 100)</h3>
-      <pre id="notesOut">[]</pre>
-    </div>
+<div id="ui">
+  <div class="msg">
+    <h1>Hand Tracking Base</h1>
+    <p>人差し指の先から光が出ます。これを敵に当てるゲームに改造できます！</p>
   </div>
+</div>
 
-  <script src="main.js"></script>
+<div id="container">
+  <video id="input_video" style="display:none;"></video>
+  <canvas id="output_canvas"></canvas>
+</div>
+
+<script>
+  const videoElement = document.getElementById('input_video');
+  const canvasElement = document.getElementById('output_canvas');
+  const canvasCtx = canvasElement.getContext('2d');
+
+  // パーティクル（キラキラ）の配列
+  let particles = [];
+
+  function onResults(results) {
+    // 画面サイズを更新
+    canvasElement.width = window.innerWidth;
+    canvasElement.height = window.innerHeight;
+
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    
+    // カメラ映像を描画
+    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+    if (results.multiHandLandmarks) {
+      for (const landmarks of results.multiHandLandmarks) {
+        // 人差し指の先端（Landmark index 8）を取得
+        const indexFingerTip = landmarks[8];
+        const x = indexFingerTip.x * canvasElement.width;
+        const y = indexFingerTip.y * canvasElement.height;
+
+        // 指先にパーティクルを追加
+        for(let i=0; i<5; i++) {
+          particles.push({
+            x: x, y: y,
+            vx: (Math.random()-0.5)*10,
+            vy: (Math.random()-0.5)*10,
+            life: 1.0,
+            color: `hsl(${Math.random()*360}, 100%, 50%)`
+          });
+        }
+        
+        // 手の骨組みを描画（デバッグ用）
+        drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
+        drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
+      }
+    }
+
+    // パーティクルの更新と描画
+    particles = particles.filter(p => p.life > 0);
+    particles.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= 0.02;
+      canvasCtx.fillStyle = p.color;
+      canvasCtx.globalAlpha = p.life;
+      canvasCtx.beginPath();
+      canvasCtx.arc(p.x, p.y, 5, 0, Math.PI*2);
+      canvasCtx.fill();
+    });
+    canvasCtx.globalAlpha = 1.0;
+
+    canvasCtx.restore();
+  }
+
+  const hands = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+
+  hands.onResults(onResults);
+
+  const camera = new Camera(videoElement, {
+    onFrame: async () => {
+      await hands.send({image: videoElement});
+    },
+    width: 1280,
+    height: 720
+  });
+  camera.start();
+</script>
 </body>
 </html>
