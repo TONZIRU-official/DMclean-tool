@@ -2,103 +2,143 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Hand Tracking DJ - Sound Manipulator</title>
+  <title>Barrier Defense - Hand Tracking Game</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
   <style>
-    body { margin: 0; overflow: hidden; background: #111; font-family: 'Arial', sans-serif; color: #0ff; }
-    canvas { position: absolute; transform: scaleX(-1); width: 100vw; height: 100vh; object-fit: cover; opacity: 0.5; }
-    #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; pointer-events: none; z-index: 10; }
-    #start-btn { pointer-events: auto; padding: 20px 40px; font-size: 24px; background: #0ff; color: #000; border: none; cursor: pointer; border-radius: 50px; box-shadow: 0 0 20px #0ff; }
-    .status { margin-top: 20px; font-size: 18px; text-shadow: 0 0 10px #0ff; text-align: center; }
-    .param-box { position: absolute; bottom: 50px; display: flex; gap: 50px; }
-    .param { background: rgba(0,0,0,0.7); padding: 15px; border: 1px solid #0ff; border-radius: 10px; width: 200px; text-align: center; }
+    body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial Black', sans-serif; }
+    canvas { position: absolute; width: 100vw; height: 100vh; object-fit: cover; }
+    #video_canvas { transform: scaleX(-1); opacity: 0.2; } /* 背景に薄くカメラ */
+    #ui { position: absolute; top: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; color: #0ff; }
+    #score-board { position: absolute; top: 20px; left: 20px; font-size: 30px; text-shadow: 0 0 10px #0ff; }
+    #hp-board { position: absolute; top: 20px; right: 20px; font-size: 30px; color: #f0f; }
+    #core { position: absolute; bottom: 0; width: 100%; height: 20px; background: linear-gradient(transparent, #0af); box-shadow: 0 -10px 20px #0af; }
+    #overlay-msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 40px; display: none; background: rgba(0,0,0,0.8); padding: 20px; border: 2px solid #0ff; }
   </style>
 </head>
 <body>
 
 <div id="ui">
-  <button id="start-btn">音楽をスタート</button>
-  <div class="status" id="status-text">ボタンを押してカメラと音を起動してください</div>
-  
-  <div class="param-box">
-    <div class="param">右手 (Filter): <br><span id="val-filter">---</span></div>
-    <div class="param">左手 (Speed): <br><span id="val-speed">---</span></div>
-  </div>
+  <div id="score-board">SCORE: 0</div>
+  <div id="hp-board">CORE HP: 10</div>
+  <div id="overlay-msg">GAME OVER<br><span style="font-size:20px">リロードして再挑戦</span></div>
+  <div id="core"></div>
 </div>
 
 <video id="input_video" style="display:none;"></video>
-<canvas id="output_canvas"></canvas>
+<canvas id="video_canvas"></canvas>
+<canvas id="game_canvas"></canvas>
 
 <script>
-  const videoElement = document.getElementById('input_video');
-  const canvasElement = document.getElementById('output_canvas');
-  const canvasCtx = canvasElement.getContext('2d');
-  const startBtn = document.getElementById('start-btn');
-  
-  let audioCtx, oscillator, filter, biquadFilter;
-  let isPlaying = false;
+  const { Engine, Render, Runner, Bodies, Composite, Body, Vector } = Matter;
 
-  // 音の準備
-  function initAudio() {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    
-    // シンプルなシンセサイザーの音を作成
-    oscillator = audioCtx.createOscillator();
-    oscillator.type = 'sawtooth'; // ギザギザしたかっこいい音
-    
-    biquadFilter = audioCtx.createBiquadFilter();
-    biquadFilter.type = 'lowpass'; // 低音だけ通すフィルター
-    
-    const gainNode = audioCtx.createGain();
-    gainNode.gain.value = 0.2; // 音量
+  // --- ゲーム設定 ---
+  let score = 0;
+  let hp = 10;
+  let isGameOver = false;
+  const gameCanvas = document.getElementById('game_canvas');
+  const videoCanvas = document.getElementById('video_canvas');
+  const vCtx = videoCanvas.getContext('2d');
 
-    oscillator.connect(biquadFilter);
-    biquadFilter.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-    
-    oscillator.start();
-    isPlaying = true;
-    startBtn.style.display = 'none';
-    document.getElementById('status-text').innerText = "左右の手を映して操作してください！";
+  // --- 物理エンジン設定 ---
+  const engine = Engine.create();
+  engine.world.gravity.y = 0.5; // 敵がゆっくり降ってくる
+
+  const render = Render.create({
+    canvas: gameCanvas,
+    engine: engine,
+    options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: 'transparent' }
+  });
+
+  // バリア本体（最初は画面外）
+  const barrier = Bodies.rectangle(-100, -100, 200, 20, { 
+    isStatic: true, 
+    render: { fillStyle: '#fff', strokeStyle: '#0ff', lineWidth: 5, glow: 20 } 
+  });
+  Composite.add(engine.world, barrier);
+
+  // 敵の生成管理
+  let enemies = [];
+  function spawnEnemy() {
+    if (isGameOver) return;
+    const size = 20 + Math.random() * 20;
+    const enemy = Bodies.circle(Math.random() * window.innerWidth, -50, size, {
+      restitution: 0.8,
+      friction: 0,
+      render: { fillStyle: '#f05' }
+    });
+    enemies.push(enemy);
+    Composite.add(engine.world, enemy);
   }
 
-  function onResults(results) {
-    canvasElement.width = window.innerWidth;
-    canvasElement.height = window.innerHeight;
-    canvasCtx.save();
-    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+  // ループ処理
+  setInterval(spawnEnemy, 1000);
 
-    if (results.multiHandLandmarks && isPlaying) {
-      results.multiHandLandmarks.forEach((landmarks, index) => {
-        const x = landmarks[8].x; // 0.0 ~ 1.0
-        const y = landmarks[8].y; // 0.0 ~ 1.0
-        
-        // どちらの手か判定（簡易的に画面の左右で分ける）
-        if (x < 0.5) { // 画面右側（反転してるのでユーザーにとっては右手）
-          // 右手の左右の動きでフィルターの周波数を変える (200Hz ~ 5000Hz)
-          const frequency = (1 - x * 2) * 5000 + 200;
-          biquadFilter.frequency.setTargetAtTime(frequency, audioCtx.currentTime, 0.1);
-          document.getElementById('val-filter').innerText = Math.floor(frequency) + " Hz";
-        } else { // 画面左側
-          // 左手の上下の動きで音の高さ（スピード感）を変える
-          const pitch = (1 - y) * 800 + 100;
-          oscillator.frequency.setTargetAtTime(pitch, audioCtx.currentTime, 0.1);
-          document.getElementById('val-speed').innerText = Math.floor(pitch) + " Hz";
+  Events.on(engine, 'afterUpdate', () => {
+    if (isGameOver) return;
+    enemies.forEach((enemy, index) => {
+      // 画面下（コア）に到達したか判定
+      if (enemy.position.y > window.innerHeight) {
+        hp--;
+        document.getElementById('hp-board').innerText = `CORE HP: ${hp}`;
+        Composite.remove(engine.world, enemy);
+        enemies.splice(index, 1);
+        if (hp <= 0) {
+          isGameOver = true;
+          document.getElementById('overlay-msg').style.display = 'block';
         }
+      }
+      // バリアで弾き飛ばした敵にスコア加算（一定以上の速度になったら）
+      if (enemy.velocity.y < -5) {
+        score += 10;
+        document.getElementById('score-board').innerText = `SCORE: ${score}`;
+      }
+    });
+  });
 
-        // 指の描画
-        canvasCtx.fillStyle = "#0ff";
-        canvasCtx.beginPath();
-        canvasCtx.arc(landmarks[8].x * canvasElement.width, landmarks[8].y * canvasElement.height, 15, 0, Math.PI*2);
-        canvasCtx.fill();
-      });
+  Render.run(render);
+  Runner.run(Runner.create(), engine);
+
+  // --- MediaPipe 設定 ---
+  function onResults(results) {
+    videoCanvas.width = window.innerWidth;
+    videoCanvas.height = window.innerHeight;
+    vCtx.save();
+    vCtx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
+    vCtx.drawImage(results.image, 0, 0, videoCanvas.width, videoCanvas.height);
+    vCtx.restore();
+
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length >= 2) {
+      // 両手がある場合、2点間にバリアを張る
+      const p1 = results.multiHandLandmarks[0][8];
+      const p2 = results.multiHandLandmarks[1][8];
+      
+      const x1 = (1 - p1.x) * window.innerWidth;
+      const y1 = p1.y * window.innerHeight;
+      const x2 = (1 - p2.x) * window.innerWidth;
+      const y2 = p2.y * window.innerHeight;
+
+      const centerX = (x1 + x2) / 2;
+      const centerY = (y1 + y2) / 2;
+      const length = Math.hypot(x1 - x2, y1 - y2);
+      const angle = Math.atan2(y2 - y1, x2 - x1);
+
+      // 物理エンジンのバリアを更新
+      Body.setPosition(barrier, { x: centerX, y: centerY });
+      Body.setAngle(barrier, angle);
+      // 長さに合わせてスケールを変えるのは難しいため、今回は固定長か、位置の瞬時移動で対応
+      // ※簡易化のため位置と角度を同期
+    } else if (results.multiHandLandmarks && results.multiHandLandmarks.length === 1) {
+      // 片手の場合はその場に短いバリア
+      const p = results.multiHandLandmarks[0][8];
+      const x = (1 - p.x) * window.innerWidth;
+      const y = p.y * window.innerHeight;
+      Body.setPosition(barrier, { x, y });
+      Body.setAngle(barrier, 0);
     }
-    canvasCtx.restore();
   }
 
-  // MediaPipe設定
   const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
   hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5 });
   hands.onResults(onResults);
@@ -107,10 +147,11 @@
     onFrame: async () => { await hands.send({image: videoElement}); },
     width: 1280, height: 720
   });
+  camera.start();
 
-  startBtn.addEventListener('click', () => {
-    initAudio();
-    camera.start();
+  window.addEventListener('resize', () => {
+    render.canvas.width = window.innerWidth;
+    render.canvas.height = window.innerHeight;
   });
 </script>
 </body>
