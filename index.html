@@ -2,113 +2,137 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Hand Tracking Game Base</title>
+  <title>AI Hand Shooter - Virus Buster</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
   <style>
-    body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
-    #container { position: relative; width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; }
-    /* カメラ映像を左右反転（鏡のようにする） */
-    canvas, video { position: absolute; transform: scaleX(-1); width: 100%; height: 100%; object-fit: cover; }
-    #ui { position: absolute; top: 20px; left: 20px; color: white; z-index: 10; pointer-events: none; }
-    .msg { background: rgba(0,0,0,0.5); padding: 10px; border-radius: 8px; }
+    body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial Black', sans-serif; }
+    canvas { position: absolute; transform: scaleX(-1); width: 100vw; height: 100vh; object-fit: cover; }
+    #ui { position: absolute; top: 20px; width: 100%; text-align: center; color: #0f0; z-index: 10; pointer-events: none; text-shadow: 0 0 10px #0f0; }
+    #score { font-size: 40px; }
+    #msg { font-size: 18px; color: white; }
+    .overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; box-shadow: inset 0 0 100px rgba(0,255,0,0.2); pointer-events: none; }
   </style>
 </head>
 <body>
 
 <div id="ui">
-  <div class="msg">
-    <h1>Hand Tracking Base</h1>
-    <p>人差し指の先から光が出ます。これを敵に当てるゲームに改造できます！</p>
-  </div>
+  <div id="score">SCORE: 0</div>
+  <div id="msg">人差し指で狙え！</div>
 </div>
+<div class="overlay"></div>
 
-<div id="container">
-  <video id="input_video" style="display:none;"></video>
-  <canvas id="output_canvas"></canvas>
-</div>
+<video id="input_video" style="display:none;"></video>
+<canvas id="output_canvas"></canvas>
 
 <script>
   const videoElement = document.getElementById('input_video');
   const canvasElement = document.getElementById('output_canvas');
   const canvasCtx = canvasElement.getContext('2d');
+  const scoreElement = document.getElementById('score');
 
-  // パーティクル（キラキラ）の配列
-  let particles = [];
+  let score = 0;
+  let enemies = [];
+  let bullets = [];
+  let frameCount = 0;
+
+  // 敵の生成
+  function spawnEnemy() {
+    enemies.push({
+      x: Math.random() * window.innerWidth,
+      y: Math.random() * window.innerHeight,
+      size: 30 + Math.random() * 40,
+      hp: 1,
+      speed: 1 + (score / 500) // スコアに応じて加速
+    });
+  }
 
   function onResults(results) {
-    // 画面サイズを更新
     canvasElement.width = window.innerWidth;
     canvasElement.height = window.innerHeight;
-
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-    
-    // カメラ映像を描画
     canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+    let fingerX = -100, fingerY = -100;
 
     if (results.multiHandLandmarks) {
       for (const landmarks of results.multiHandLandmarks) {
-        // 人差し指の先端（Landmark index 8）を取得
-        const indexFingerTip = landmarks[8];
-        const x = indexFingerTip.x * canvasElement.width;
-        const y = indexFingerTip.y * canvasElement.height;
+        // 人差し指の先端
+        const tip = landmarks[8];
+        fingerX = tip.x * canvasElement.width;
+        fingerY = tip.y * canvasElement.height;
 
-        // 指先にパーティクルを追加
-        for(let i=0; i<5; i++) {
-          particles.push({
-            x: x, y: y,
-            vx: (Math.random()-0.5)*10,
-            vy: (Math.random()-0.5)*10,
-            life: 1.0,
-            color: `hsl(${Math.random()*360}, 100%, 50%)`
-          });
+        // 照準の描画
+        canvasCtx.strokeStyle = '#0f0';
+        canvasCtx.lineWidth = 3;
+        canvasCtx.beginPath();
+        canvasCtx.arc(fingerX, fingerY, 20, 0, Math.PI*2);
+        canvasCtx.stroke();
+
+        // 弾の発射（一定間隔）
+        if (frameCount % 5 === 0) {
+          bullets.push({ x: fingerX, y: fingerY, r: 5 });
         }
-        
-        // 手の骨組みを描画（デバッグ用）
-        drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
-        drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
       }
     }
 
-    // パーティクルの更新と描画
-    particles = particles.filter(p => p.life > 0);
-    particles.forEach(p => {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.life -= 0.02;
-      canvasCtx.fillStyle = p.color;
-      canvasCtx.globalAlpha = p.life;
+    // 弾の更新
+    bullets.forEach((b, bi) => {
+      b.r += 10; // 弾が広がる演出
+      canvasCtx.strokeStyle = `rgba(0, 255, 0, ${1 - b.r/100})`;
       canvasCtx.beginPath();
-      canvasCtx.arc(p.x, p.y, 5, 0, Math.PI*2);
-      canvasCtx.fill();
+      canvasCtx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+      canvasCtx.stroke();
+      if (b.r > 100) bullets.splice(bi, 1);
     });
-    canvasCtx.globalAlpha = 1.0;
 
+    // 敵の更新
+    if (frameCount % 60 === 0) spawnEnemy();
+    enemies.forEach((e, ei) => {
+      // プレイヤー（指）に向かって少しずつ近づく演出
+      e.size += 0.5; // だんだん巨大化して迫ってくる
+      
+      // 描画
+      canvasCtx.fillStyle = 'rgba(255, 0, 50, 0.7)';
+      canvasCtx.strokeStyle = '#fff';
+      canvasCtx.beginPath();
+      canvasCtx.arc(e.x, e.y, e.size, 0, Math.PI*2);
+      canvasCtx.fill();
+      canvasCtx.stroke();
+
+      // 当たり判定（弾と敵）
+      bullets.forEach((b) => {
+        const dist = Math.hypot(e.x - b.x, e.y - b.y);
+        if (dist < e.size) {
+          enemies.splice(ei, 1);
+          score += 100;
+          scoreElement.innerText = `SCORE: ${score}`;
+        }
+      });
+
+      // 敗北条件（敵が大きくなりすぎたら）
+      if (e.size > 200) {
+        enemies = [];
+        score = 0;
+        scoreElement.innerText = `GAME OVER - RESETTING`;
+      }
+    });
+
+    frameCount++;
     canvasCtx.restore();
   }
 
   const hands = new Hands({
     locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
   });
-
-  hands.setOptions({
-    maxNumHands: 2,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.5,
-    minTrackingConfidence: 0.5
-  });
-
+  hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7 });
   hands.onResults(onResults);
 
   const camera = new Camera(videoElement, {
-    onFrame: async () => {
-      await hands.send({image: videoElement});
-    },
-    width: 1280,
-    height: 720
+    onFrame: async () => { await hands.send({image: videoElement}); },
+    width: 1280, height: 720
   });
   camera.start();
 </script>
