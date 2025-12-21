@@ -2,122 +2,145 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>AI Finger Gunner</title>
+  <title>Barrier Defense - Hand Tracking Game</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
   <style>
     body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial Black', sans-serif; }
-    canvas { position: absolute; transform: scaleX(-1); width: 100vw; height: 100vh; object-fit: cover; }
-    #ui { position: absolute; top: 20px; width: 100%; text-align: center; color: #fff; z-index: 10; pointer-events: none; }
-    #ammo { position: absolute; bottom: 20px; right: 20px; font-size: 40px; color: #ff0; }
-    #crosshair { position: absolute; width: 40px; height: 40px; border: 2px solid #f00; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; z-index: 20; display: none; }
-    #crosshair::after { content: ''; position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; background: #f00; border-radius: 50%; transform: translate(-50%, -50%); }
+    canvas { position: absolute; width: 100vw; height: 100vh; object-fit: cover; }
+    #video_canvas { transform: scaleX(-1); opacity: 0.2; } /* 背景に薄くカメラ */
+    #ui { position: absolute; top: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; color: #0ff; }
+    #score-board { position: absolute; top: 20px; left: 20px; font-size: 30px; text-shadow: 0 0 10px #0ff; }
+    #hp-board { position: absolute; top: 20px; right: 20px; font-size: 30px; color: #f0f; }
+    #core { position: absolute; bottom: 0; width: 100%; height: 20px; background: linear-gradient(transparent, #0af); box-shadow: 0 -10px 20px #0af; }
+    #overlay-msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 40px; display: none; background: rgba(0,0,0,0.8); padding: 20px; border: 2px solid #0ff; }
   </style>
 </head>
 <body>
 
 <div id="ui">
-  <div id="score" style="font-size: 30px;">SCORE: 0</div>
-  <div id="ammo">BULLETS: 10</div>
+  <div id="score-board">SCORE: 0</div>
+  <div id="hp-board">CORE HP: 10</div>
+  <div id="overlay-msg">GAME OVER<br><span style="font-size:20px">リロードして再挑戦</span></div>
+  <div id="core"></div>
 </div>
-<div id="crosshair"></div>
 
 <video id="input_video" style="display:none;"></video>
-<canvas id="output_canvas"></canvas>
+<canvas id="video_canvas"></canvas>
+<canvas id="game_canvas"></canvas>
 
 <script>
-  const videoElement = document.getElementById('input_video');
-  const canvasElement = document.getElementById('output_canvas');
-  const canvasCtx = canvasElement.getContext('2d');
-  const crosshair = document.getElementById('crosshair');
+  const { Engine, Render, Runner, Bodies, Composite, Body, Vector } = Matter;
 
+  // --- ゲーム設定 ---
   let score = 0;
-  let ammo = 10;
+  let hp = 10;
+  let isGameOver = false;
+  const gameCanvas = document.getElementById('game_canvas');
+  const videoCanvas = document.getElementById('video_canvas');
+  const vCtx = videoCanvas.getContext('2d');
+
+  // --- 物理エンジン設定 ---
+  const engine = Engine.create();
+  engine.world.gravity.y = 0.5; // 敵がゆっくり降ってくる
+
+  const render = Render.create({
+    canvas: gameCanvas,
+    engine: engine,
+    options: { width: window.innerWidth, height: window.innerHeight, wireframes: false, background: 'transparent' }
+  });
+
+  // バリア本体（最初は画面外）
+  const barrier = Bodies.rectangle(-100, -100, 200, 20, { 
+    isStatic: true, 
+    render: { fillStyle: '#fff', strokeStyle: '#0ff', lineWidth: 5, glow: 20 } 
+  });
+  Composite.add(engine.world, barrier);
+
+  // 敵の生成管理
   let enemies = [];
-  let frameCount = 0;
-  let lastShootTime = 0;
-
   function spawnEnemy() {
-    enemies.push({
-      x: Math.random() * window.innerWidth,
-      y: Math.random() * window.innerHeight,
-      r: 30 + Math.random() * 20,
-      hp: 1
+    if (isGameOver) return;
+    const size = 20 + Math.random() * 20;
+    const enemy = Bodies.circle(Math.random() * window.innerWidth, -50, size, {
+      restitution: 0.8,
+      friction: 0,
+      render: { fillStyle: '#f05' }
     });
+    enemies.push(enemy);
+    Composite.add(engine.world, enemy);
   }
 
+  // ループ処理
+  setInterval(spawnEnemy, 1000);
+
+  Events.on(engine, 'afterUpdate', () => {
+    if (isGameOver) return;
+    enemies.forEach((enemy, index) => {
+      // 画面下（コア）に到達したか判定
+      if (enemy.position.y > window.innerHeight) {
+        hp--;
+        document.getElementById('hp-board').innerText = `CORE HP: ${hp}`;
+        Composite.remove(engine.world, enemy);
+        enemies.splice(index, 1);
+        if (hp <= 0) {
+          isGameOver = true;
+          document.getElementById('overlay-msg').style.display = 'block';
+        }
+      }
+      // バリアで弾き飛ばした敵にスコア加算（一定以上の速度になったら）
+      if (enemy.velocity.y < -5) {
+        score += 10;
+        document.getElementById('score-board').innerText = `SCORE: ${score}`;
+      }
+    });
+  });
+
+  Render.run(render);
+  Runner.run(Runner.create(), engine);
+
+  // --- MediaPipe 設定 ---
   function onResults(results) {
-    canvasElement.width = window.innerWidth;
-    canvasElement.height = window.innerHeight;
-    canvasCtx.save();
-    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+    videoCanvas.width = window.innerWidth;
+    videoCanvas.height = window.innerHeight;
+    vCtx.save();
+    vCtx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
+    vCtx.drawImage(results.image, 0, 0, videoCanvas.width, videoCanvas.height);
+    vCtx.restore();
 
-    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-      const landmarks = results.multiHandLandmarks[0];
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length >= 2) {
+      // 両手がある場合、2点間にバリアを張る
+      const p1 = results.multiHandLandmarks[0][8];
+      const p2 = results.multiHandLandmarks[1][8];
       
-      // 指鉄砲の判定（親指と人差し指が立っていて、中指以降が曲がっている）
-      const isIndexUp = landmarks[8].y < landmarks[6].y;
-      const isThumbUp = landmarks[4].y < landmarks[3].y;
-      const isMiddleDown = landmarks[12].y > landmarks[10].y;
+      const x1 = (1 - p1.x) * window.innerWidth;
+      const y1 = p1.y * window.innerHeight;
+      const x2 = (1 - p2.x) * window.innerWidth;
+      const y2 = p2.y * window.innerHeight;
 
-      if (isIndexUp && isThumbUp && isMiddleDown) {
-        const x = (1 - landmarks[8].x) * window.innerWidth; // 反転考慮
-        const y = landmarks[8].y * window.innerHeight;
+      const centerX = (x1 + x2) / 2;
+      const centerY = (y1 + y2) / 2;
+      const length = Math.hypot(x1 - x2, y1 - y2);
+      const angle = Math.atan2(y2 - y1, x2 - x1);
 
-        crosshair.style.display = 'block';
-        crosshair.style.left = x + 'px';
-        crosshair.style.top = y + 'px';
-
-        // 発射（0.3秒間隔）
-        const now = Date.now();
-        if (now - lastShootTime > 300 && ammo > 0) {
-          shoot(x, y);
-          lastShootTime = now;
-        }
-      } else {
-        crosshair.style.display = 'none';
-        // 手を握ったらリロード
-        if (isMiddleDown && !isIndexUp) {
-          ammo = 10;
-          document.getElementById('ammo').innerText = "BULLETS: " + ammo;
-        }
-      }
+      // 物理エンジンのバリアを更新
+      Body.setPosition(barrier, { x: centerX, y: centerY });
+      Body.setAngle(barrier, angle);
+      // 長さに合わせてスケールを変えるのは難しいため、今回は固定長か、位置の瞬時移動で対応
+      // ※簡易化のため位置と角度を同期
+    } else if (results.multiHandLandmarks && results.multiHandLandmarks.length === 1) {
+      // 片手の場合はその場に短いバリア
+      const p = results.multiHandLandmarks[0][8];
+      const x = (1 - p.x) * window.innerWidth;
+      const y = p.y * window.innerHeight;
+      Body.setPosition(barrier, { x, y });
+      Body.setAngle(barrier, 0);
     }
-
-    // 敵の描画と更新
-    if (frameCount % 60 === 0) spawnEnemy();
-    enemies.forEach((e, i) => {
-      canvasCtx.fillStyle = 'rgba(255, 0, 0, 0.6)';
-      canvasCtx.beginPath();
-      canvasCtx.arc(window.innerWidth - e.x, e.y, e.r, 0, Math.PI*2); // 反転描画
-      canvasCtx.fill();
-      e.r += 0.2;
-      if (e.r > 150) { enemies.splice(i, 1); score = Math.max(0, score - 50); }
-    });
-
-    frameCount++;
-    canvasCtx.restore();
-  }
-
-  function shoot(x, y) {
-    ammo--;
-    document.getElementById('ammo').innerText = "BULLETS: " + ammo;
-    
-    // 当たり判定（反転しているので注意）
-    const targetX = x;
-    enemies.forEach((e, i) => {
-      const dist = Math.hypot(e.x - targetX, e.y - y);
-      if (dist < e.r) {
-        enemies.splice(i, 1);
-        score += 100;
-        document.getElementById('score').innerText = "SCORE: " + score;
-      }
-    });
   }
 
   const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-  hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7 });
+  hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5 });
   hands.onResults(onResults);
 
   const camera = new Camera(videoElement, {
@@ -125,6 +148,11 @@
     width: 1280, height: 720
   });
   camera.start();
+
+  window.addEventListener('resize', () => {
+    render.canvas.width = window.innerWidth;
+    render.canvas.height = window.innerHeight;
+  });
 </script>
 </body>
 </html>
