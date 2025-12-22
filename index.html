@@ -2,35 +2,57 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Neon Finger Balance Pro</title>
+    <title>Finger Balance - Full Vision</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <style>
-        body { margin: 0; background: #000; color: #fff; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
-        /* 背景カメラ映像の設定 */
+        body { margin: 0; background: #000; overflow: hidden; font-family: 'Arial Black', sans-serif; }
+        
+        /* カメラをはっきり表示（反転させて鏡のように） */
         #input_video {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            object-fit: cover; transform: scaleX(-1); opacity: 0.3; z-index: 0;
+            object-fit: cover; transform: scaleX(-1); z-index: 0;
         }
-        canvas { position: relative; display: block; z-index: 1; pointer-events: none; }
         
-        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;
-                   display: flex; flex-direction: column; justify-content: space-between; padding: 30px; box-sizing: border-box; z-index: 2; }
-        .stats { font-size: 24px; font-weight: bold; text-shadow: 0 0 10px #0ff; }
+        /* ゲームキャンバスを前面に配置 */
+        canvas { position: fixed; top: 0; left: 0; z-index: 1; pointer-events: none; }
         
-        #ui-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-                     text-align: center; pointer-events: auto; z-index: 3; }
-        #msg { font-size: 48px; color: #0ff; text-shadow: 0 0 20px #0ff; margin-bottom: 20px; }
-        button { background: transparent; border: 2px solid #0ff; color: #0ff; padding: 10px 20px; 
-                 font-size: 20px; cursor: pointer; border-radius: 5px; transition: 0.3s; }
-        button:hover { background: rgba(0, 255, 255, 0.2); box-shadow: 0 0 15px #0ff; }
-        
-        .guide { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); opacity: 0.7; }
-        #loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #0ff; font-size: 24px; }
+        #overlay { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            pointer-events: none; z-index: 2; 
+            display: flex; flex-direction: column; justify-content: space-between; padding: 20px;
+        }
+
+        .stats { 
+            color: #fff; font-size: 32px; font-weight: bold; 
+            text-shadow: 0 0 10px #000, 0 0 5px #0ff; 
+        }
+
+        #ui-center { 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            text-align: center; pointer-events: auto; z-index: 3;
+        }
+
+        #msg { 
+            font-size: 60px; color: #fff; 
+            text-shadow: 0 0 20px #f0f, 0 0 10px #000; margin-bottom: 20px; 
+        }
+
+        button { 
+            background: #0ff; color: #000; border: none; padding: 15px 40px; 
+            font-size: 24px; font-weight: bold; cursor: pointer; border-radius: 50px;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.8); transition: 0.2s;
+        }
+        button:hover { transform: scale(1.1); background: #fff; }
+
+        #loading { 
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
+            color: #0ff; font-size: 24px; z-index: 4; text-shadow: 0 0 10px #000;
+        }
     </style>
 </head>
 <body>
-    <div id="loading">AI & CAMERA LOADING...</div>
+    <div id="loading">カメラを起動中...</div>
     <video id="input_video" playsinline></video>
     <canvas id="canvas"></canvas>
     
@@ -40,10 +62,9 @@
             <div>BEST: <span id="best">0.00</span>s</div>
         </div>
         <div id="ui-center">
-            <div id="msg">READY?</div>
-            <button id="start-btn" style="display:none;">START GAME</button>
+            <div id="msg">FINGER BALANCE</div>
+            <button id="start-btn" style="display:none;">START</button>
         </div>
-        <div class="guide">人差し指を立ててバランスを保て！</div>
     </div>
 
     <script>
@@ -61,17 +82,9 @@
         let poleAngle = 0, poleVel = 0;
         let score = 0, bestScore = localStorage.getItem('bestScore') || 0;
         let active = false;
-        let particles = [];
         let startTime = 0;
 
         bestDisplay.innerText = bestScore;
-
-        const config = {
-            gravity: 0.007,
-            friction: 0.985,
-            length: 280,
-            difficultyScale: 0.0001
-        };
 
         function resize() {
             width = canvas.width = window.innerWidth;
@@ -79,24 +92,6 @@
         }
         window.addEventListener('resize', resize);
         resize();
-
-        class Particle {
-            constructor(x, y) {
-                this.x = x; this.y = y;
-                this.vx = (Math.random() - 0.5) * 10;
-                this.vy = (Math.random() - 0.5) * 10;
-                this.alpha = 1;
-            }
-            draw() {
-                ctx.strokeStyle = `rgba(0, 255, 255, ${this.alpha})`;
-                ctx.beginPath();
-                ctx.moveTo(this.x, this.y);
-                ctx.lineTo(this.x + this.vx, this.y + this.vy);
-                ctx.stroke();
-                this.x += this.vx; this.y += this.vy;
-                this.alpha -= 0.02;
-            }
-        }
 
         const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
         hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7 });
@@ -108,12 +103,11 @@
                 fingerX = (1 - tip.x) * width;
                 fingerY = tip.y * height;
                 
-                // 初回検知時にボタンを表示
-                if (!active && msgDisplay.innerText === "READY?") {
+                if (!active && startBtn.style.display === 'none') {
                     startBtn.style.display = 'inline-block';
                 }
             } else if (active) {
-                gameOver("FINGER LOST!");
+                gameOver("LOST FINGER!");
             }
         });
 
@@ -127,7 +121,7 @@
             active = true;
             score = 0;
             startTime = performance.now();
-            poleAngle = (Math.random() - 0.5) * 0.2;
+            poleAngle = (Math.random() - 0.5) * 0.1;
             poleVel = 0;
             msgDisplay.innerText = "";
             startBtn.style.display = 'none';
@@ -135,70 +129,74 @@
 
         startBtn.addEventListener('click', startGame);
 
-        function gameOver(reason = "GAME OVER") {
-            if (!active) return;
+        function gameOver(text) {
             active = false;
             if (parseFloat(score) > parseFloat(bestScore)) {
                 bestScore = score;
                 localStorage.setItem('bestScore', bestScore);
                 bestDisplay.innerText = bestScore;
             }
-            msgDisplay.innerText = reason + "\n" + score + "s";
+            msgDisplay.innerText = text;
             startBtn.innerText = "RETRY";
             startBtn.style.display = 'inline-block';
         }
 
         function draw() {
-            // 背景クリア（残像効果）
-            ctx.fillStyle = 'rgba(5, 5, 5, 0.4)';
-            ctx.fillRect(0, 0, width, height);
+            // 前のフレームを消去（背景がカメラなので完全に透明にする）
+            ctx.clearRect(0, 0, width, height);
 
             if (active) {
                 score = ((performance.now() - startTime) / 1000).toFixed(2);
                 timeDisplay.innerText = score;
 
-                // 物理演算
-                let currentGravity = config.gravity + (score * config.difficultyScale);
-                poleVel += Math.sin(poleAngle) * currentGravity;
-                poleVel -= (fingerX - lastFingerX) * 0.0018; 
-                poleVel *= config.friction;
+                // 物理計算
+                let grav = 0.007 + (score * 0.0001);
+                poleVel += Math.sin(poleAngle) * grav;
+                poleVel -= (fingerX - lastFingerX) * 0.002;
+                poleVel *= 0.98;
                 poleAngle += poleVel;
                 lastFingerX = fingerX;
 
-                if (Math.abs(poleAngle) > Math.PI / 2.2) gameOver();
+                if (Math.abs(poleAngle) > Math.PI / 2.1) gameOver("OVER!");
 
-                // 棒の描画
-                const ex = fingerX + Math.sin(poleAngle) * config.length;
-                const ey = fingerY - Math.cos(poleAngle) * config.length;
+                // 棒の描画（ネオン効果を最大化）
+                const ex = fingerX + Math.sin(poleAngle) * 300;
+                const ey = fingerY - Math.cos(poleAngle) * 300;
 
-                ctx.shadowBlur = 15;
+                // 外側の光
+                ctx.shadowBlur = 20;
                 ctx.shadowColor = '#0ff';
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 8;
+                ctx.strokeStyle = '#0ff';
+                ctx.lineWidth = 12;
                 ctx.lineCap = 'round';
                 ctx.beginPath();
                 ctx.moveTo(fingerX, fingerY);
                 ctx.lineTo(ex, ey);
                 ctx.stroke();
 
-                ctx.fillStyle = '#f0f';
-                ctx.beginPath();
-                ctx.arc(ex, ey, 8, 0, Math.PI * 2);
-                ctx.fill();
+                // 内側の白い芯
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 4;
+                ctx.stroke();
 
-                if (Math.abs(poleVel) > 0.04) particles.push(new Particle(ex, ey));
+                // 先端の赤いランプ
+                ctx.fillStyle = '#f00';
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = '#f00';
+                ctx.beginPath();
+                ctx.arc(ex, ey, 10, 0, Math.PI * 2);
+                ctx.fill();
             }
 
-            // 指先の表示（常に表示）
-            ctx.shadowBlur = 20;
-            ctx.strokeStyle = '#0ff';
-            ctx.lineWidth = 3;
+            // 指先のターゲット
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#0ff';
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.arc(fingerX, fingerY, 20, 0, Math.PI * 2);
+            ctx.arc(fingerX, fingerY, 25, 0, Math.PI * 2);
             ctx.stroke();
-
-            particles = particles.filter(p => p.alpha > 0);
-            particles.forEach(p => p.draw());
 
             requestAnimationFrame(draw);
         }
