@@ -2,112 +2,76 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Finger Balance - Full Vision</title>
+    <title>Finger Balance - Catch & Hold</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <style>
         body { margin: 0; background: #000; overflow: hidden; font-family: 'Arial Black', sans-serif; }
-        
-        /* カメラをはっきり表示（反転させて鏡のように） */
-        #input_video {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            object-fit: cover; transform: scaleX(-1); z-index: 0;
-        }
-        
-        /* ゲームキャンバスを前面に配置 */
+        #input_video { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); z-index: 0; }
         canvas { position: fixed; top: 0; left: 0; z-index: 1; pointer-events: none; }
-        
-        #overlay { 
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
-            pointer-events: none; z-index: 2; 
-            display: flex; flex-direction: column; justify-content: space-between; padding: 20px;
-        }
-
-        .stats { 
-            color: #fff; font-size: 32px; font-weight: bold; 
-            text-shadow: 0 0 10px #000, 0 0 5px #0ff; 
-        }
-
-        #ui-center { 
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-            text-align: center; pointer-events: auto; z-index: 3;
-        }
-
-        #msg { 
-            font-size: 60px; color: #fff; 
-            text-shadow: 0 0 20px #f0f, 0 0 10px #000; margin-bottom: 20px; 
-        }
-
-        button { 
-            background: #0ff; color: #000; border: none; padding: 15px 40px; 
-            font-size: 24px; font-weight: bold; cursor: pointer; border-radius: 50px;
-            box-shadow: 0 0 20px rgba(0, 255, 255, 0.8); transition: 0.2s;
-        }
-        button:hover { transform: scale(1.1); background: #fff; }
-
-        #loading { 
-            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-            color: #0ff; font-size: 24px; z-index: 4; text-shadow: 0 0 10px #000;
-        }
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; display: flex; flex-direction: column; justify-content: space-between; padding: 20px; }
+        .stats { color: #fff; font-size: 32px; text-shadow: 0 0 10px #000, 0 0 5px #0f0; }
+        #msg { position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); font-size: 60px; color: #fff; text-shadow: 0 0 20px #f00; text-align: center; }
+        .guide { position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%); color: #fff; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px; }
     </style>
 </head>
 <body>
-    <div id="loading">カメラを起動中...</div>
     <video id="input_video" playsinline></video>
     <canvas id="canvas"></canvas>
-    
     <div id="overlay">
-        <div class="stats">
-            <div>TIME: <span id="time">0.00</span>s</div>
-            <div>BEST: <span id="best">0.00</span>s</div>
-        </div>
-        <div id="ui-center">
-            <div id="msg">FINGER BALANCE</div>
-            <button id="start-btn" style="display:none;">START</button>
-        </div>
+        <div class="stats">SCORE: <span id="score">0</span></div>
+        <div id="msg">READY...</div>
+        <div class="guide">落ちてくる棒を指先で受け止めて！</div>
     </div>
 
     <script>
         const videoElement = document.getElementById('input_video');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
-        const timeDisplay = document.getElementById('time');
-        const bestDisplay = document.getElementById('best');
+        const scoreDisplay = document.getElementById('score');
         const msgDisplay = document.getElementById('msg');
-        const startBtn = document.getElementById('start-btn');
-        const loading = document.getElementById('loading');
 
         let width, height;
         let fingerX = 0, fingerY = 0, lastFingerX = 0;
-        let poleAngle = 0, poleVel = 0;
-        let score = 0, bestScore = localStorage.getItem('bestScore') || 0;
-        let active = false;
-        let startTime = 0;
+        
+        // 棒（オブジェクト）の状態
+        let pole = {
+            x: 0, y: -500, 
+            angle: 0, angVel: 0,
+            velY: 0, 
+            isCaught: false,
+            length: 300
+        };
 
-        bestDisplay.innerText = bestScore;
+        let score = 0;
+        let gameActive = true;
 
         function resize() {
             width = canvas.width = window.innerWidth;
             height = canvas.height = window.innerHeight;
+            resetPole();
         }
         window.addEventListener('resize', resize);
         resize();
+
+        function resetPole() {
+            pole.x = Math.random() * (width - 200) + 100;
+            pole.y = -300;
+            pole.angle = (Math.random() - 0.5) * 1.5; // ランダムな角度で落ちてくる
+            pole.angVel = (Math.random() - 0.5) * 0.05;
+            pole.velY = 3; // 落下速度
+            pole.isCaught = false;
+        }
 
         const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
         hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7 });
         
         hands.onResults(results => {
-            loading.style.display = 'none';
             if (results.multiHandLandmarks?.length > 0) {
                 const tip = results.multiHandLandmarks[0][8];
                 fingerX = (1 - tip.x) * width;
                 fingerY = tip.y * height;
-                
-                if (!active && startBtn.style.display === 'none') {
-                    startBtn.style.display = 'inline-block';
-                }
-            } else if (active) {
-                gameOver("LOST FINGER!");
+                if (msgDisplay.innerText === "READY...") msgDisplay.innerText = "";
             }
         });
 
@@ -117,88 +81,78 @@
         });
         camera.start();
 
-        function startGame() {
-            active = true;
-            score = 0;
-            startTime = performance.now();
-            poleAngle = (Math.random() - 0.5) * 0.1;
-            poleVel = 0;
-            msgDisplay.innerText = "";
-            startBtn.style.display = 'none';
-        }
-
-        startBtn.addEventListener('click', startGame);
-
-        function gameOver(text) {
-            active = false;
-            if (parseFloat(score) > parseFloat(bestScore)) {
-                bestScore = score;
-                localStorage.setItem('bestScore', bestScore);
-                bestDisplay.innerText = bestScore;
-            }
-            msgDisplay.innerText = text;
-            startBtn.innerText = "RETRY";
-            startBtn.style.display = 'inline-block';
-        }
-
         function draw() {
-            // 前のフレームを消去（背景がカメラなので完全に透明にする）
             ctx.clearRect(0, 0, width, height);
 
-            if (active) {
-                score = ((performance.now() - startTime) / 1000).toFixed(2);
-                timeDisplay.innerText = score;
+            if (gameActive) {
+                // 指と棒の当たり判定
+                let dist = Math.hypot(fingerX - pole.x, fingerY - pole.y);
+                if (!pole.isCaught && dist < 40) {
+                    pole.isCaught = true;
+                    score++;
+                    scoreDisplay.innerText = score;
+                }
 
-                // 物理計算
-                let grav = 0.004 + (score * 0.0001);
-                poleVel += Math.sin(poleAngle) * grav;
-                poleVel -= (fingerX - lastFingerX) * 0.002;
-                poleVel *= 0.98;
-                poleAngle += poleVel;
-                lastFingerX = fingerX;
+                if (!pole.isCaught) {
+                    // 落下中
+                    pole.y += pole.velY;
+                    pole.angle += pole.angVel;
+                    if (pole.y > height + 500) resetPole(); // 見逃したら次が降ってくる
+                } else {
+                    // キャッチ中（指の上での物理）
+                    let grav = 0.008;
+                    pole.angVel += Math.sin(poleAngleCorrection(pole.angle)) * grav;
+                    // 指を動かした時の慣性
+                    pole.angVel -= (fingerX - lastFingerX) * 0.002;
+                    pole.angVel *= 0.98;
+                    pole.angle += pole.angVel;
+                    
+                    // 棒の位置を指に固定
+                    pole.x = fingerX;
+                    pole.y = fingerY;
 
-                if (Math.abs(poleAngle) > Math.PI / 2.1) gameOver("OVER!");
-
-                // 棒の描画（ネオン効果を最大化）
-                const ex = fingerX + Math.sin(poleAngle) * 300;
-                const ey = fingerY - Math.cos(poleAngle) * 300;
-
-                // 外側の光
-                ctx.shadowBlur = 20;
-                ctx.shadowColor = '#0ff';
-                ctx.strokeStyle = '#0ff';
-                ctx.lineWidth = 12;
-                ctx.lineCap = 'round';
-                ctx.beginPath();
-                ctx.moveTo(fingerX, fingerY);
-                ctx.lineTo(ex, ey);
-                ctx.stroke();
-
-                // 内側の白い芯
-                ctx.shadowBlur = 0;
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 4;
-                ctx.stroke();
-
-                // 先端の赤いランプ
-                ctx.fillStyle = '#f00';
-                ctx.shadowBlur = 15;
-                ctx.shadowColor = '#f00';
-                ctx.beginPath();
-                ctx.arc(ex, ey, 10, 0, Math.PI * 2);
-                ctx.fill();
+                    // 落下判定（角度がつきすぎたら落としたとみなす）
+                    if (Math.abs(poleAngleCorrection(pole.angle)) > Math.PI / 2.1) {
+                        pole.isCaught = false;
+                        pole.velY = 10; // ストンと落ちる
+                    }
+                }
             }
 
-            // 指先のターゲット
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = '#0ff';
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 2;
+            // 棒の描画
+            drawPole(pole.x, pole.y, pole.angle);
+
+            // 指先のガイド
+            ctx.strokeStyle = '#0ff';
+            ctx.lineWidth = 3;
             ctx.beginPath();
-            ctx.arc(fingerX, fingerY, 25, 0, Math.PI * 2);
+            ctx.arc(fingerX, fingerY, 30, 0, Math.PI * 2);
             ctx.stroke();
 
+            lastFingerX = fingerX;
             requestAnimationFrame(draw);
+        }
+
+        // 棒を垂直基準で描画するための計算
+        function poleAngleCorrection(a) { return a; }
+
+        function drawPole(x, y, angle) {
+            const halfLen = pole.length / 2;
+            // 棒の端点を計算
+            const x1 = x - Math.sin(angle) * 0; // 下端を指の位置に
+            const y1 = y + Math.cos(angle) * 0;
+            const x2 = x + Math.sin(angle) * pole.length;
+            const y2 = y - Math.cos(angle) * pole.length;
+
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = pole.isCaught ? '#0f0' : '#f00';
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 12;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
         }
 
         draw();
