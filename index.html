@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>DM-cleantool[RDF]>>Rtitle
+    <title>DM-cleantool[RDF]>>Rtitle</title>
     <style>
         body { font-family: sans-serif; padding: 20px; background: #36393f; color: white; }
         .container { max-width: 600px; margin: auto; background: #2f3136; padding: 20px; border-radius: 8px; }
@@ -14,6 +14,7 @@
         #log { background: #202225; padding: 15px; height: 250px; overflow-y: scroll; font-family: monospace; font-size: 12px; border-radius: 4px; }
         .err { color: #f04747; }
         .suc { color: #43b581; }
+        .warn { color: #faa61a; }
     </style>
 </head>
 <body>
@@ -22,7 +23,7 @@
         <p style="font-size: 0.8em; color: #b9bbbe;">※指定した名前と完全に一致するグループからのみ離脱します。</p>
         
         <label>1. Token</label>
-        <input type="password" id="1234" placeholder="ここにトークンを貼り付け">
+        <input type="password" id="token" placeholder="ここにトークンを貼り付け">
         
         <label>2. 対象のグループ名</label>
         <input type="text" id="targetName" placeholder="グループDM名を貼ってください">
@@ -34,6 +35,8 @@
 
     <script>
         const logBox = document.getElementById('log');
+        const runBtn = document.getElementById('runBtn');
+
         const print = (txt, cls='') => {
             const div = document.createElement('div');
             div.className = cls;
@@ -42,12 +45,14 @@
             logBox.scrollTop = logBox.scrollHeight;
         };
 
-        document.getElementById('runBtn').addEventListener('click', async () => {
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+        runBtn.addEventListener('click', async () => {
             const token = document.getElementById('token').value.trim();
             const target = document.getElementById('targetName').value.trim();
             
             if(!token || !target) return alert('入力が足りません');
-            document.getElementById('runBtn').disabled = true;
+            runBtn.disabled = true;
             logBox.innerHTML = '';
 
             try {
@@ -60,36 +65,47 @@
 
                 if (!Array.isArray(data)) {
                     print(`❌ 失敗: ${data.message || 'トークンが不正です'}`, 'err');
-                    document.getElementById('runBtn').disabled = false;
+                    runBtn.disabled = false;
                     return;
                 }
 
-                // 名前が一致するグループDM
+                // 名前が一致するグループDM（type 3）
                 const targets = data.filter(c => c.type === 3 && (c.name === target));
-                
                 print(`対象グループを ${targets.length} 件見つけました。`);
 
                 for (const g of targets) {
-                    print(`離脱中: ${g.id}...`);
-                    const delRes = await fetch(`https://discord.com/api/v9/channels/${g.id}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': token }
-                    });
-
-                    if (delRes.ok) {
-                        print(`✅ 成功: ${g.id}`, 'suc');
-                    } else {
-                        const errJson = await delRes.json();
-                        print(`❌ 失敗: ${errJson.message}`, 'err');
-                    }
+                    let success = false;
                     
-                    await new Promise(r => setTimeout(r, 1000));
+                    while (!success) {
+                        print(`離脱中: ${g.id}...`);
+                        const delRes = await fetch(`https://discord.com/api/v9/channels/${g.id}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': token }
+                        });
+
+                        if (delRes.ok) {
+                            print(`✅ 成功: ${g.id}`, 'suc');
+                            success = true;
+                            // 成功後の待機：600ms〜1000msのランダム（スピードと安全のバランス）
+                            await sleep(Math.floor(Math.random() * 400) + 600);
+                        } else if (delRes.status === 429) {
+                            // レート制限にかかった場合
+                            const retryAfter = (await delRes.json()).retry_after;
+                            print(`⚠️ 制限発生: ${retryAfter}秒待機してリトライします...`, 'warn');
+                            await sleep(retryAfter * 1000 + 200);
+                            // successはfalseのままなのでループして再試行
+                        } else {
+                            const errJson = await delRes.json();
+                            print(`❌ 失敗: ${errJson.message}`, 'err');
+                            success = true; // エラー時はスキップして次へ
+                        }
+                    }
                 }
                 print('すべての処理が完了しました。');
             } catch (e) {
                 print('エラー: ' + e.message, 'err');
             }
-            document.getElementById('runBtn').disabled = false;
+            runBtn.disabled = false;
         });
     </script>
 </body>
