@@ -84,7 +84,7 @@
                         print(`❌ 失敗: ${errJson.message}`, 'err');
                     }
                     // 安全のため4秒待機
-                    await new Promise(r => setTimeout(r, 2000));
+                    await new Promise(r => setTimeout(r, 1000));
                 }
                 print('すべての処理が完了しました。');
             } catch (e) {
