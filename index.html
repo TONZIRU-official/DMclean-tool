@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>Discord Group Clean-up</title>
+    <title>DM-cleantoll[RDF]>>Rtitle
     <style>
         body { font-family: sans-serif; padding: 20px; background: #36393f; color: white; }
         .container { max-width: 600px; margin: auto; background: #2f3136; padding: 20px; border-radius: 8px; }
@@ -18,14 +18,14 @@
 </head>
 <body>
     <div class="container">
-        <h3>Discord グループDM一括整理</h3>
-        <p style="font-size: 0.8em; color: #b9bbbe;">※指定した名前と**完全に一致**するグループからのみ離脱します。</p>
+        <h3>Discord グループDM一括退出[RDF-tool]</h3>
+        <p style="font-size: 0.8em; color: #b9bbbe;">※指定した名前と完全に一致するグループからのみ離脱します。</p>
         
         <label>1. Token</label>
-        <input type="password" id="token" placeholder="ここにトークンを貼り付け">
+        <input type="password" id="1234" placeholder="ここにトークンを貼り付け">
         
         <label>2. 対象のグループ名</label>
-        <input type="text" id="targetName" placeholder="例: 迷惑グループA">
+        <input type="text" id="targetName" placeholder="グループDM名を貼ってください">
         
         <button id="runBtn">実行する</button>
 
@@ -58,14 +58,13 @@
 
                 const data = await res.json();
 
-                // 取得失敗のチェック
                 if (!Array.isArray(data)) {
                     print(`❌ 失敗: ${data.message || 'トークンが不正です'}`, 'err');
                     document.getElementById('runBtn').disabled = false;
                     return;
                 }
 
-                // 名前が一致するグループDM(type:3)を抽出
+                // 名前が一致するグループDM
                 const targets = data.filter(c => c.type === 3 && (c.name === target));
                 
                 print(`対象グループを ${targets.length} 件見つけました。`);
@@ -83,7 +82,7 @@
                         const errJson = await delRes.json();
                         print(`❌ 失敗: ${errJson.message}`, 'err');
                     }
-                    // 安全のため4秒待機
+                    
                     await new Promise(r => setTimeout(r, 1000));
                 }
                 print('すべての処理が完了しました。');
